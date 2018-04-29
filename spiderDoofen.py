@@ -9,7 +9,7 @@ import base64
 import hashlib
 import json
 import os
-import 
+import win32com
 
 #全局变量
 conf = {
@@ -154,7 +154,16 @@ def classLoad(*arg):
         tm.showerror("showinfo", "班级\" " + className.get() + " \"没有学生数据，不能读取考试列表。")
         runLog.insert(tk.END,"\nExams List Loading Error With No Student Found.")
 
-#获取内容
+childrenDict = {}
+def getChildren(fatherDict):
+    for i in range(len(fatherDict)):
+        childKey = list(fatherDict.keys())[i]
+        childDict = fatherDict[childKey]
+        if isinstance(childDict,dict):
+            getChildren(childDict)
+        else:
+            childrenDict[childKey] = childDict
+
 def getContent():
     runLog.insert(tk.END,"\n\n\nStart To Get Contents. Checking Values...")
 
@@ -175,44 +184,23 @@ def getContent():
 
     runLog.insert(tk.END,"\nChecking Done.")
 
-    '''
     for student in students:
-        file = open("/test/" + student["name"] + ".txt","a+")
-        #创建新文件
         for subjectId in subjects:
             header_send["Cookie"] = "JSESSIONID=" + conf["jsessionId"]
             #数据包头
 
             url = "http://www.doofen.com/doofen/851001/report/subjectDatas?rId=" + \
-                subjectId + "_" + examId + "_" + stuId
+                subjectId + "_" + examId + "_" + student["id"]
             #数据包地址
 
             request = ur.Request(url = url, headers = header_send)
             response = ur.urlopen(request).read().decode()
-            
             dataObj = json.loads(response)
-            '''
-"""
-            file.write(
-                        "学科\t得分\t总分\t得分率\t年级均分\t年级名次\t年级百分位\t班级均分\t班级名次\t班级百分位\n" +
-                        dataObj["ScoreInfo"]["xkName"] + "\t" + dataObj["ScoreInfo"]["xkName"] + "\t" +
-                        dataObj["ScoreInfo"]["stuScore"] + "\t" + dataObj["ScoreInfo"]["paperScore"] + "\t" +
-                        dataObj["ScoreInfo"]["scoreRate"] + "\t" + dataObj["ScoreInfo"]["gradeAvgScore"] + "\t" +
-                        dataObj["ScoreInfo"]["stuGradeRank"] + "\t" + dataObj["ScoreInfo"]["stuGradePR"] + "\t" +
-                        dataObj["ScoreInfo"]["classAvgScore"] + "\t" + dataObj["ScoreInfo"]["stuClassRank"] + "\t" +
-                        dataObj["ScoreInfo"]["stuClassPR"] + "\t\n\n/n失分题目:/n/n")
-            for item in dataObj["LostInfo"]["wrongItemStatInfo"]:
-                file.write(
-                        item["realTopicName"] + "-" + item["topicName"] + "-" + item["realId"]
-                        
-                        )
-            file.write(
-                        "失分题目:\n\t"
-                        "需要提高:\n\t基础部分:\n\t\000" + dataObj["examkpInfo"]["baseKplist"] +
-                        "巩固部分:\n\t\000" + dataObj["examkpInfo"]["improveKpList"] +
-                        "拔高部分:\n\t\000" + dataObj["examkpInfo"]["upgradeKpList"]
-                       )
-"""
+
+            childrenDict.clean()
+            getChildren(dataObj)
+            for item in childrenDict:
+                replaceItem(item)
 
 #生成主窗体
 root = tk.Tk()
