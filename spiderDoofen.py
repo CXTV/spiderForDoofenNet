@@ -3,21 +3,25 @@
 import urllib.request as ur
 import urllib.parse as up
 import tkinter as tk
+import tkinter.messagebox as tm
 from tkinter import ttk
 import base64
 import hashlib
 import json
+import os
+import 
 
 #全局变量
-subjectId = "1"
-stuId = "8510011600000686"
-examId = "2001523842908308"
 conf = {
     "username":"",
     "password":"",
     "jsessionId":"",
     "classId":"",
-    "classes":""
+    "classes":[],
+    "students":[],
+    "subjects":[],
+    "examId":"",
+    "exams":[]
     }
 header_send = {
     'Host': 'www.doofen.com',
@@ -89,66 +93,92 @@ def logIn():
 
 #登录成功
 def logedIn():
-    feedBack.config(text = "登录成功!")
+    runLog.insert(tk.END,"Logged In As " + conf["username"] + " ,JSESSIONID=" + conf["jsessionId"])
     
-    #绘制主界面容器
-    frmMain = tk.Frame(root)
-
-    tk.Label(frmMain,text = "选择班级:").grid(column = 0,row =0)
-    className = tk.StringVar()
-    classChoose = ttk.Combobox(frmMain,textvariable = className)
-    classChoose.grid(column = 1,row = 0)
-    classChoose["state"] = "readonly"
-    classChoose.bind("<<ComboboxSelected>>", lambda _ : getStuid(className.get()))#这个参数传递折腾死我了
-
-    tk.Label(frmMain,text = "选择考试:").grid(column = 0,row = 1)
-    testName = tk.StringVar()
-    testChoose = ttk.Combobox(frmMain,textvariable = testName)
-    testChoose.grid(column = 1,row = 1)
-    testChoose["state"] = "readonly"
-
-    tk.Label(frmMain,text = "选择科目:").grid(column = 0,row = 2)
-    subChoose = tk.Listbox(frmMain,selectmode = tk.MULTIPLE)
-    subChoose.grid(column = 1,row = 2)
-
-    tk.Button(frmMain,text = "开始抓取", command = getContent).grid(row = 3,column = 2)
-
-
-    #加载班级数据
+    #加载班级选项
     tmpClass = []
     for classNo in conf["classes"]:
         tmpClass.append(classNo.split("|")[0])
     classChoose["values"] = tuple(tmpClass)
     classChoose.current(0)
 
-    for sub in ["语文","数学","英语","物理","化学","生物"]:  
+    for sub in ["语文","数学","英语","物理","化学","历史","地理","政治","生物"]:
         subChoose.insert(tk.END,sub)
 
     #应用新界面
     frmLog.grid_remove()
     frmMain.grid(column = 0)
-    
-#获取stuid
-def getStuid(className):
-    #print(className)
-    conf["classId"] = "851001" + className[className.find("1"):]#获得链接
 
+    classLoad()#载入班级数据
+    
+#加载班级内容
+def classLoad(*arg):
+    runLog.insert(tk.END,"\n\nStart to load class " + className.get())
+
+    #获取学生id
+    conf["classId"] = "851001" + className.get()[className.get().find("1"):]#获得链接
     stuUrl = "http://www.doofen.com/doofen/851001/cls/" + conf["classId"] + "/stu/list"
     response = ur.urlopen(stuUrl)#发送数据包
 
-    students = []
-    for person in json.loads(response.read().decode()):
-        tmp = {"id":person["stuId"],"name":person["stuName"]}
-        students.append(tmp)
-    #移植对象
-    #print(students)
+    resRead = response.read()
+    runLog.insert(tk.END,"\nStudents List Package Received With " + str(len(resRead)) + " Bytes.")
 
+    conf["students"].clear()
+    for person in json.loads(resRead.decode()):
+        tmp = {"id":str(person["stuId"]),"name":person["stuName"]}
+        conf["students"].append(tmp)#写入到conf
+    
+    if conf["students"] == []:
+        runLog.insert(tk.END,"\nStudents List Loading Error With An Empty List.")
+        tm.showerror("showinfo", "班级\" " + className.get() + " \"的学生数据为空。")
+    else:runLog.insert(tk.END,"\nStudents List Loaded.\n" + str(conf["students"]))
+
+    #获取考试名称
+    try:
+        stuUrl = "http://www.doofen.com/doofen/851001/examsit/student/studentRptData?s=" + conf["students"][0]["id"] + "&p=0&r=3"
+        response = ur.urlopen(stuUrl)#发送数据包
+        
+        resRead = response.read()
+        runLog.insert(tk.END,"\nExams List Package Received: \n" + resRead.decode())
+
+        for exam in json.loads(resRead.decode()):
+            if conf["exams"].count(str(exam["examId"])) == 0:
+                conf["exams"].append(str(exam["examId"]))
+
+        tmpExams = conf["exams"]
+        examChoose["values"] = tuple(tmpExams)
+        examChoose.current(0)
+        runLog.insert(tk.END,"\n\nExams List Loaded.\n" + str(conf["exams"]))
+
+    except IndexError:
+        tm.showerror("showinfo", "班级\" " + className.get() + " \"没有学生数据，不能读取考试列表。")
+        runLog.insert(tk.END,"\nExams List Loading Error With No Student Found.")
 
 #获取内容
 def getContent():
+    runLog.insert(tk.END,"\n\n\nStart To Get Contents. Checking Values...")
+
+    runLog.insert(tk.END,"\nStudents List Loaded With A Length Of " + str(len(conf["students"])))
+
+    conf["subjects"].clear()
+    for sub in subChoose.curselection():
+        conf["subjects"].append(str(sub + 1))
+    runLog.insert(tk.END,".\nSubjects List Loaded As " + str(conf["subjects"]))
+
+    conf["examId"] = examName.get()
+    runLog.insert(tk.END,".\nExamId Loaded As " + str(conf["examId"]))
+
+    if conf["students"] == [] or conf["subjects"] == [] or conf["examId"] == "":
+        runLog.insert(tk.END,".\nIncomplete Arguments.\nStop Running.")
+        tm.showerror("showinfo", "设置不完整或值无效。")
+        return
+
+    runLog.insert(tk.END,"\nChecking Done.")
+
+    '''
     for student in students:
         file = open("/test/" + student["name"] + ".txt","a+")
-
+        #创建新文件
         for subjectId in subjects:
             header_send["Cookie"] = "JSESSIONID=" + conf["jsessionId"]
             #数据包头
@@ -161,28 +191,81 @@ def getContent():
             response = ur.urlopen(request).read().decode()
             
             dataObj = json.loads(response)
-
+            '''
+"""
+            file.write(
+                        "学科\t得分\t总分\t得分率\t年级均分\t年级名次\t年级百分位\t班级均分\t班级名次\t班级百分位\n" +
+                        dataObj["ScoreInfo"]["xkName"] + "\t" + dataObj["ScoreInfo"]["xkName"] + "\t" +
+                        dataObj["ScoreInfo"]["stuScore"] + "\t" + dataObj["ScoreInfo"]["paperScore"] + "\t" +
+                        dataObj["ScoreInfo"]["scoreRate"] + "\t" + dataObj["ScoreInfo"]["gradeAvgScore"] + "\t" +
+                        dataObj["ScoreInfo"]["stuGradeRank"] + "\t" + dataObj["ScoreInfo"]["stuGradePR"] + "\t" +
+                        dataObj["ScoreInfo"]["classAvgScore"] + "\t" + dataObj["ScoreInfo"]["stuClassRank"] + "\t" +
+                        dataObj["ScoreInfo"]["stuClassPR"] + "\t\n\n/n失分题目:/n/n")
+            for item in dataObj["LostInfo"]["wrongItemStatInfo"]:
+                file.write(
+                        item["realTopicName"] + "-" + item["topicName"] + "-" + item["realId"]
+                        
+                        )
+            file.write(
+                        "失分题目:\n\t"
+                        "需要提高:\n\t基础部分:\n\t\000" + dataObj["examkpInfo"]["baseKplist"] +
+                        "巩固部分:\n\t\000" + dataObj["examkpInfo"]["improveKpList"] +
+                        "拔高部分:\n\t\000" + dataObj["examkpInfo"]["upgradeKpList"]
+                       )
+"""
 
 #生成主窗体
 root = tk.Tk()
 root.title("多分网整理工具")
 
 #绘制登录容器
-frmLog = tk.Frame(root,width = 50,height = 30)
-frmLog.grid(column = 0)
+frmLog = tk.Frame(root)
 
-tk.Label(frmLog,text = "登入您的多分网账号:").grid(row = 0)
+tk.Label(frmLog,text = "登入您的多分网账号:").grid(row = 0, columnspan = 2)
 tk.Label(frmLog,text = "手机号:").grid(row = 1,sticky = "W")
 tk.Label(frmLog,text = "密码:").grid(row = 2,sticky = "W")#3个文本
 
 feedBack = tk.Label(frmLog,text = "",fg = "Blue")
-feedBack.grid(row = 4)#反馈文本
+feedBack.grid(row = 4, columnspan = 2)#反馈文本
 
 userInput = tk.Entry(frmLog)
 pwdInput = tk.Entry(frmLog,show = "*")
 userInput.grid(row = 1,column = 1)
 pwdInput.grid(row = 2,column = 1)#输入框*2
 
-tk.Button(frmLog,text = "登录",command = logIn).grid(row = 3)
+tk.Button(frmLog,text = "登录",command = logIn).grid(row = 3, columnspan = 2)
+
+
+#绘制主界面容器
+frmMain = tk.Frame(root)
+
+tk.Label(frmMain,text = "选择班级:").grid(column = 0,row =0)
+className = tk.StringVar()
+classChoose = ttk.Combobox(frmMain,textvariable = className)
+classChoose.grid(column = 1,row = 0)
+classChoose["state"] = "readonly"
+classChoose.bind("<<ComboboxSelected>>",classLoad)
+
+tk.Label(frmMain,text = "选择考试:").grid(column = 0,row = 1)
+examName = tk.StringVar()
+examChoose = ttk.Combobox(frmMain,textvariable = examName)
+examChoose.grid(column = 1,row = 1)
+examChoose["state"] = "readonly"
+
+tk.Label(frmMain,text = "选择科目:").grid(column = 0,row = 2)
+subChoose = tk.Listbox(frmMain,selectmode = tk.MULTIPLE)
+subChoose.grid(column = 1,row = 2)
+
+runLog = tk.Text(frmMain,height = 10,width = 50)
+runLog.grid(column = 0,row = 4, columnspan = 4)
+
+tk.Button(frmMain,text = "开始抓取", command = getContent).grid(row = 1,column = 2, rowspan = 3)
+
+
+frmLog.grid(column = 0)#显示登录容器
+
+
+userInput.insert(0,"18984812289")
+pwdInput.insert(0,"8912220")
 
 root.mainloop()
