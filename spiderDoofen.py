@@ -8,6 +8,7 @@ from tkinter import ttk
 import base64
 import hashlib
 import json
+import tkinter.filedialog as tf
 import os
 import win32com
 
@@ -21,7 +22,9 @@ conf = {
     "students":[],
     "subjects":[],
     "examId":"",
-    "exams":[]
+    "exams":[],
+    "outputPath":"",
+    "inputFile":""
     }
 header_send = {
     'Host': 'www.doofen.com',
@@ -93,7 +96,7 @@ def logIn():
 
 #登录成功
 def logedIn():
-    runLog.insert(tk.END,"Logged In As " + conf["username"] + " ,JSESSIONID=" + conf["jsessionId"])
+    log("\nLogged In As " + conf["username"] + " ,JSESSIONID=" + conf["jsessionId"])
     
     #加载班级选项
     tmpClass = []
@@ -113,7 +116,7 @@ def logedIn():
     
 #加载班级内容
 def classLoad(*arg):
-    runLog.insert(tk.END,"\n\nStart to load class " + className.get())
+    log("\n\nStart to load class " + className.get())
 
     #获取学生id
     conf["classId"] = "851001" + className.get()[className.get().find("1"):]#获得链接
@@ -121,7 +124,7 @@ def classLoad(*arg):
     response = ur.urlopen(stuUrl)#发送数据包
 
     resRead = response.read()
-    runLog.insert(tk.END,"\nStudents List Package Received With " + str(len(resRead)) + " Bytes.")
+    log("\nStudents List Package Received With " + str(len(resRead)) + " Bytes.")
 
     conf["students"].clear()
     for person in json.loads(resRead.decode()):
@@ -129,9 +132,9 @@ def classLoad(*arg):
         conf["students"].append(tmp)#写入到conf
     
     if conf["students"] == []:
-        runLog.insert(tk.END,"\nStudents List Loading Error With An Empty List.")
+        log("\nStudents List Loading Error With An Empty List.")
         tm.showerror("showinfo", "班级\" " + className.get() + " \"的学生数据为空。")
-    else:runLog.insert(tk.END,"\nStudents List Loaded.\n" + str(conf["students"]))
+    else:log("\nStudents List Loaded.\n" + str(conf["students"]))
 
     #获取考试名称
     try:
@@ -139,7 +142,7 @@ def classLoad(*arg):
         response = ur.urlopen(stuUrl)#发送数据包
         
         resRead = response.read()
-        runLog.insert(tk.END,"\nExams List Package Received: \n" + resRead.decode())
+        log("\nExams List Package Received: \n" + resRead.decode())
 
         for exam in json.loads(resRead.decode()):
             if conf["exams"].count(str(exam["examId"])) == 0:
@@ -148,11 +151,11 @@ def classLoad(*arg):
         tmpExams = conf["exams"]
         examChoose["values"] = tuple(tmpExams)
         examChoose.current(0)
-        runLog.insert(tk.END,"\n\nExams List Loaded.\n" + str(conf["exams"]))
+        log("\n\nExams List Loaded.\n" + str(conf["exams"]))
 
     except IndexError:
         tm.showerror("showinfo", "班级\" " + className.get() + " \"没有学生数据，不能读取考试列表。")
-        runLog.insert(tk.END,"\nExams List Loading Error With No Student Found.")
+        log("\nExams List Loading Error With No Student Found.")
 
 childrenDict = {}
 def getChildren(fatherDict):
@@ -164,43 +167,101 @@ def getChildren(fatherDict):
         else:
             childrenDict[childKey] = childDict
 
-def getContent():
-    runLog.insert(tk.END,"\n\n\nStart To Get Contents. Checking Values...")
+#选择模板文件
+def selectFile():
+    filename = tf.askopenfilename(filetypes=[("Microsoft Word 97 - 2003 文档", "*.doc"),("Microsoft Word 文档","*.docx")])  
+    inputFileName.set(filename)
 
-    runLog.insert(tk.END,"\nStudents List Loaded With A Length Of " + str(len(conf["students"])))
+#选择输出目录
+def selectPath():
+    filepath = tf.askdirectory()
+    outputPathName.set(filepath)
+
+#Word处理类
+class RemoteWord:
+    def __init__(self, filename=None):
+        self.xlApp=win32com.client.DispatchEx('Word.Application')
+        self.xlApp.Visible=0
+        self.xlApp.DisplayAlerts=0
+        if filename:
+            self.filename=filename
+            if os.path.exists(self.filename):
+                self.doc=self.xlApp.Documents.Open(filename)
+            else:
+                self.doc = self.xlApp.Documents.Add()
+                self.doc.SaveAs(filename)
+        else:
+            self.doc=self.xlApp.Documents.Add()
+            self.filename=''
+
+    #文档另存为
+    def save_as(self, filename):
+        self.doc.SaveAs(filename)
+
+    #文档关闭
+    def close(self):
+        self.xlApp.Documents.Close()
+
+    #替换文字
+    def replace_doc(self,string,new_string):
+        self.xlApp.Selection.Find.ClearFormatting()
+        self.xlApp.Selection.Find.Replacement.ClearFormatting()
+        self.xlApp.Selection.Find.Execute(string, False, False, False, False, False, True, 1, True, new_string, 2)
+
+def getContent():
+    log("\n\n\nStart To Get Contents. Checking Values...")
+
+    log("\nStudents List Loaded With A Length Of " + str(len(conf["students"])))
 
     conf["subjects"].clear()
     for sub in subChoose.curselection():
-        conf["subjects"].append(str(sub + 1))
-    runLog.insert(tk.END,".\nSubjects List Loaded As " + str(conf["subjects"]))
+        conf["subjects"].append({"id":str(sub + 1),"name":subChoose.get(sub)})
+    log(".\nSubjects List Loaded As " + str(conf["subjects"]))
 
     conf["examId"] = examName.get()
-    runLog.insert(tk.END,".\nExamId Loaded As " + str(conf["examId"]))
+    log(".\nExamId Loaded As " + str(conf["examId"]))
 
-    if conf["students"] == [] or conf["subjects"] == [] or conf["examId"] == "":
-        runLog.insert(tk.END,".\nIncomplete Arguments.\nStop Running.")
+    conf["inputFile"] = inputFileName.get()
+    log(".\nInput File Loaded As " + str(conf["inputFile"]))
+
+    conf["outputPath"] = outputPathName.get()
+    log("\nOutput Path Loaded As " + str(conf["outputPath"]))
+
+    if conf["students"] == [] or conf["subjects"] == [] or conf["examId"] == "" or conf["inputFile"] == "" or conf["outputPath"] == "":
+        log("\nIncomplete Arguments.\nStop Running.")
         tm.showerror("showinfo", "设置不完整或值无效。")
         return
 
-    runLog.insert(tk.END,"\nChecking Done.")
+    log("\nChecking Done.\n\nStarting Getting Content...Please Wait...")
+    tm.showinfo("showinfo", "抓取可能需要几分种时间，在程序提示完成前，请不要点击或关闭本程序。\n如果系统弹出了\"无响应\"提示框，请忽视。（除非已经真的很久没动静了）")
 
-    for student in students:
-        for subjectId in subjects:
+    for student in conf["students"]:#遍历学生
+        for subject in conf["subjects"]:#遍历科目
             header_send["Cookie"] = "JSESSIONID=" + conf["jsessionId"]
             #数据包头
 
             url = "http://www.doofen.com/doofen/851001/report/subjectDatas?rId=" + \
-                subjectId + "_" + examId + "_" + student["id"]
+                subject["id"] + "_" + conf["examId"] + "_" + student["id"]
             #数据包地址
 
             request = ur.Request(url = url, headers = header_send)
             response = ur.urlopen(request).read().decode()
             dataObj = json.loads(response)
 
-            childrenDict.clean()
+            childrenDict.clear()
             getChildren(dataObj)
-            for item in childrenDict:
-                replaceItem(item)
+            #for item in childrenDict:
+            #    replaceItem(item)
+
+            log("\n Subject " + subject["name"] +  " of " +
+               student["name"] + " Loaded With " + str(len(childrenDict)) + " Items.")
+            #返回信息
+    tm.showinfo("showinfo", "抓取完成！")
+
+def log(string): 
+    runLog.config(state = tk.NORMAL)
+    runLog.insert(tk.END,string)
+    runLog.config(state = tk.DISABLED)
 
 #生成主窗体
 root = tk.Tk()
@@ -244,10 +305,20 @@ tk.Label(frmMain,text = "选择科目:").grid(column = 0,row = 2)
 subChoose = tk.Listbox(frmMain,selectmode = tk.MULTIPLE)
 subChoose.grid(column = 1,row = 2)
 
-runLog = tk.Text(frmMain,height = 10,width = 50)
+inputFileName = tk.StringVar()
+inputFile = tk.Entry(frmMain, textvariable = inputFileName, state = "readonly")
+inputFile.grid(column = 2, row = 0, padx = 3)
+tk.Button(frmMain, text = "选择模板", command = selectFile).grid(row = 0, column = 3)
+
+outputPathName = tk.StringVar()
+outputPath = tk.Entry(frmMain, textvariable = outputPathName, state = "readonly")
+outputPath.grid(column = 2, row = 1, padx = 3)
+tk.Button(frmMain, text = "选择输出路径", command = selectPath).grid(row = 1, column = 3)
+
+runLog = tk.Text(frmMain,height = 10,width = 62, state = tk.DISABLED)
 runLog.grid(column = 0,row = 4, columnspan = 4)
 
-tk.Button(frmMain,text = "开始抓取", command = getContent).grid(row = 1,column = 2, rowspan = 3)
+tk.Button(frmMain,text = "开始抓取", command = getContent, width = 15, height = 4).grid(row = 2,column = 2, columnspan = 2)
 
 
 frmLog.grid(column = 0)#显示登录容器
@@ -256,4 +327,11 @@ frmLog.grid(column = 0)#显示登录容器
 userInput.insert(0,"18984812289")
 pwdInput.insert(0,"8912220")
 
+log("-" *50 +
+    "\n欢迎使用多分网数据整理工具！\n本工具使用厉害的不得了的Python开发，并在MIT协议下开源。\n" +
+    "源码地址: https://github.com/CaptainMorch/spiderForDoofenNet \n" +
+    "作者:Captain_Morch \n" +
+    "For My Class 23 :)\n\n" +
+    "软件使用说明: \n https://github.com/CaptainMorch/spiderForDoofenNet/blob/master/README.md \n" +
+    "-" *50)
 root.mainloop()
