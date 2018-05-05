@@ -82,13 +82,13 @@ def readconf():
 def checkupdate():
     log("Start Checking For Updates...")
     response = ur.urlopen("http://p7zz4jl0d.bkt.clouddn.com/update")
-    lateVision = json.loads(response.read().decode())
-    log("Present Vision: " + str(thisVision) + " ,Lastest Vision: " + str(lateVision))
+    resRead = json.loads(response.read().decode())
+    log("Present Vision: " + str(thisVision) + " ,Lastest Vision: " + str(resRead["vision"]))
     # 发包解包
 
-    if lateVision > thisVision:  # 询问下载
+    if resRead["vision"] > thisVision:  # 询问下载
         if tm.askyesno("更新", "有可用的更新，是否现在下载？"):
-            webbrowser.open("http://p7zz4jl0d.bkt.clouddn.com/" + str(lateVision) + ".exe")
+            webbrowser.open(resRead["url"])
 
 #
 # 多分网的密码上传加密算法<<http://www.doofen.com/doofen/assets/scripts/login/login.js
