@@ -67,6 +67,7 @@ def readconf():
             log(str(conf))
             login()
             getcontent()
+        else:conf["crashed"] = 0
     # 断点继续
 
     if conf["remember"]:
@@ -412,9 +413,9 @@ def getcontent():
             log("Subject " + subject["name"] +  " of " +
                student["name"] + " Loaded With " + str(len(childrenDict)) + " Items.")
 
-            del conf["students"][stuId]
-            confwrite()
-            # 写入配置文件
+        del conf["students"][stuId]
+        confwrite()
+        # 写入配置文件
 
         app.ActiveWorkbook.Save()
         app.ActiveWorkbook.Close()
