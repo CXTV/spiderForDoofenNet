@@ -20,7 +20,7 @@ import win32com.client  # Use "pip install pypiwin32" to get it
 #
 # 全局变量
 #
-thisVision = 2336
+thisVision = 2337
 conf = {
     "username":"",
     "password":"",
@@ -31,12 +31,11 @@ conf = {
     "students":{},
     "subjects":[],
     "examId":"",
-    "exams":[],
+    "exams":{},
     "outputPath":"",
     "inputFile":"",
     "crashed":0,
-    "showExcel":0,
-    "firstRun":1
+    "showExcel":0
     }
 header_send = {
     'Host': 'www.doofen.com',
@@ -50,6 +49,17 @@ header_send = {
     'Accept-Encoding': 'gzip, deflate',
     'Accept-Language': 'zh-CN,zh;q=0.9'
     }  # 定义Head
+subDict = {
+    "语文": 1,
+    "数学": 2,
+    "英语": 3,
+    "物理": 4,
+    "化学": 5,
+    "历史": 6,
+    "地理": 7,
+    "政治": 8,
+    "生物": 9
+    }
 
 #
 # 读取配置数据
@@ -57,11 +67,27 @@ header_send = {
 def readconf():
     global conf
 
-    file = open(r"spiderDoofen.conf", "r")
-    content = file.read()
-    log("读取配置文件完毕.(" + str(len(content)) + "Bytes)")
-    conf = json.loads(content.replace("'","\""))
+    log("开始读取配置文件.")
+    try:
+        file = open(r"spiderDoofen.conf", "r")
+    except FileNotFoundError:
+        log("未找到配置文件.")
+        webbrowser.open("http://p7zz4jl0d.bkt.clouddn.com/introduction.html")
+        try:
+            file = open(r"spiderDoofen.conf", "w")
+        except:
+            log("创建配置文件时出错." + format_exc() ,2)
+            tm.showerror("错误","无法创建配置文件，程序将退出.")
+            exit()
+        else:
+            confwrite()
+            log("创建完毕.")
+    else:
+        content = file.read()
+        log("完毕.(" + str(len(content)) + "Bytes)")
+        conf = json.loads(content.replace("'","\""))
     file.close()
+    
 
     if conf["crashed"]:
         if tm.askyesno("继续","程序上次运行时意外崩溃。是否从断点继续生成？"):
@@ -86,14 +112,18 @@ def readconf():
 #
 def checkupdate():
     log("开始检查更新...")
-    response = ur.urlopen("http://p7zz4jl0d.bkt.clouddn.com/update")
-    resRead = json.loads(response.read().decode())
-    log("完毕.当前版本：" + str(thisVision) + " ，最新版本：" + str(resRead["vision"]))
-    # 发包解包
-
-    if resRead["vision"] > thisVision:  # 询问下载
-        if tm.askyesno("更新", "有可用的更新，是否现在下载？"):
-            webbrowser.open(resRead["url"])
+    try:
+        response = ur.urlopen("http://p7zz4jl0d.bkt.clouddn.com/update")
+    except:
+        log("检查更新时发生错误." + format_exc() ,2)
+    else:
+        resRead = json.loads(response.read().decode())
+        log("完毕.当前版本：" + str(thisVision) + " ，最新版本：" + str(resRead["vision"]))
+        # 发包解包
+        
+        if resRead["vision"] > thisVision:  # 询问下载
+            if tm.askyesno("更新", "有可用的更新，是否现在下载？"):
+                webbrowser.open(resRead["url"])
 
 #
 # 多分网的密码上传加密算法<<http://www.doofen.com/doofen/assets/scripts/login/login.js
@@ -169,9 +199,6 @@ def logedin():
     classChoose["values"] = tuple(tmpClass)
     classChoose.current(0)
 
-    for sub in ["语文","数学","英语","物理","化学","历史","地理","政治","生物"]:
-        subChoose.insert(tk.END,sub)  # 加载学科列表
-
     # 应用新界面
     frmLog.grid_remove()
     frmMain.grid(column = 0)
@@ -218,24 +245,47 @@ def classload(*arg):
                 + list(conf["students"].keys())[0] + "&p=0&r=3"
         response = ur.urlopen(stuUrl)  # 发送数据包
         
-        resRead = response.read()
+        resRead = response.read().decode()
         log("请求考试列表成功.( " + str(len(resRead)) + " bytes)")
+        #log(resRead, 3)
 
-        for exam in json.loads(resRead.decode()):  # 遍历试卷列表
-            if conf["exams"].count(str(exam["examId"])) == 0:  # 寻找新的id
-                conf["exams"].append(str(exam["examId"]))  # 插入新的考试id
+        tmpExams = []
+        for exam in json.loads(resRead):  # 遍历试卷列表
+            examName = exam["examName"]
 
-        tmpExams = conf["exams"]
+            if str(examName) not in conf["exams"]:  # 查找Id
+                conf["exams"][str(examName)] = {
+                    "subs": [], 
+                    "id": str(exam["examId"])
+                    }  # 插入新的考试Id
+                tmpExams.append(examName)
+
+            conf["exams"][str(examName)]["subs"].append(str(exam["xkId"]))  # 插入考试学科
+
         examChoose["values"] = tuple(tmpExams)
         examChoose.current(0)
         # 写入试卷列表
 
-        log("考试列表加载完毕.\n" + str(conf["exams"]))
-
+        #log(str(conf["exams"]),3)
+        log("考试列表加载完毕.\n" + str(tmpExams))
+        
+        examLoad()  # 加载学科
     except IndexError:  # 处理班级错误
         tm.showwarning("警告", "班级\" " + className.get() + " \"没有学生数据，不能读取考试列表。")
         log("学生列表为空，加载失败.",1)
+        subChoose.delete(0,tk.END)  # 清空学科列表
 
+#
+# 写入学科数据
+#
+def examLoad(*arg):
+    subChoose.delete(0,tk.END)  # 清空学科列表
+
+    subList = list(subDict.keys())
+    for sub in conf["exams"][examChoose.get()]["subs"]:
+        subChoose.insert(tk.END, subList[int(sub) - 1])
+
+    log("成功加载 " + examChoose.get() + " 的学科数据.")
 childrenDict = {}
 def getchildren(fatherDict):  # 遍历字典中所有键-值
     for i in range(len(fatherDict)):
@@ -274,12 +324,16 @@ def getcontent():
         log(str(len(conf["students"])) + "名学生.")
 
         conf["subjects"].clear()
+        subList = subDict.values()
         for sub in subChoose.curselection():
-            conf["subjects"].append({"id":str(sub + 1),"name":subChoose.get(sub)})
+            conf["subjects"].append(
+                {"id":str(subDict[subChoose.get(sub)]),
+                 "name":subChoose.get(sub)}
+                )
         log("科目列表：" + str(conf["subjects"]))
 
-        conf["examId"] = examName.get()
-        log("考试Id：" + str(conf["examId"]))
+        conf["examId"] = conf["exams"][examName.get()]["id"]
+        log("考试Id：" + conf["examId"])
 
         conf["inputFile"] = inputFileName.get()
         log("模板文件：" + conf["inputFile"])
@@ -303,8 +357,7 @@ def getcontent():
 
 
         log("完毕.\n\t开始抓取内容...")
-        tm.showinfo("提示", "抓取可能需要十余分钟时间，在程序提示完成前，请不要点击或关闭本程序。\n" +
-                    "如果系统弹出了\"无响应\"提示框，请忽视。（除非已经真的很久没动静了）")
+        tm.showinfo("提示", "抓取可能需要十余分钟时间，在程序提示完成前，请不要点击或关闭本程序。")
 
         # 考试全科大表(获取班级排名)
         url = "http://www.doofen.com/doofen/851001/rpt100/1001?clsId=" + \
@@ -329,7 +382,7 @@ def getcontent():
 
     # 唤起Excel
     try:
-        app = win32com.client.Dispatch('Excel.Application')
+        app = win32com.client.DispatchEx('Excel.Application')
         app.Visible = conf["showExcel"]
         app.DisplayAlerts=0
     except:
@@ -376,6 +429,7 @@ def getcontent():
     num = 0
     total = str(len(conf["students"]))
     
+    errorNo = 0
     tryNo = 0
     for stuId in conf["students"].copy():  # 遍历学生
         try:
@@ -388,7 +442,7 @@ def getcontent():
             try:template = app.Workbooks.Open(conf["inputFile"])
             except:
                 log("无法打开: \"" + conf["inputFile"] + "\".停止运行.\n" + format_exc(),2)
-                tm.showerror("错误", "无法打开选择的模板文档，抓取停止\n请尝试手动重启Excel")
+                tm.showerror("错误", "无法打开选择的模板文档，抓取停止")
                 return
             #else:log("Opened " + conf["inputFile"])
 
@@ -424,7 +478,9 @@ def getcontent():
                 # 遍历字典对象
 
                 # 整理错题
-                wrongInfo = childrenDict["wrongItemStatInfo"]
+                try:wrongInfo = childrenDict["wrongItemStatInfo"]
+                except KeyError:wrongInfo = []
+                
                 childrenDict["wrongItemStatInfo"] = ""
                 # 获取错题单行
                 wrongStart = app.ActiveSheet.Cells.Find(What = "wrongStart" + str(subject["id"]), LookAt=1 )
@@ -472,7 +528,6 @@ def getcontent():
                     log("错误超过允许次数.停止运行.",2)
                     return
             else:
-                #if tm.askyesno("错误","Excel被意外关闭.\n尝试."):
                 log("Excel窗口被关闭.",1)
 
 
@@ -494,7 +549,7 @@ def confwrite():
 # 日志生成函数
 #
 def log(string,type = 0):
-    typeList = ["[Info] ","[Warn] ","[Error] "]
+    typeList = ["[Info] ","[Warn] ","[Error] ","[Debug] "]
     print(typeList[type] + string)
 
 
@@ -548,10 +603,10 @@ if __name__ == "__main__":
     #   │        │xxx     │     └────┘   │
     #   │        │xxx     │                    │
     # 3 │        └────┘     ☑显示Excel    │
-    #   │ ┌─────────────────┐ │
-    #   │ │log:                              │ │
-    # 4 │ │    xxx                           │ │
-    #   │ └─────────────────┘ │
+    #   │                                        │
+    # 4 │ 使用说明：http://t.cn/R1h3mFh          │  
+    # 5 │ 制作：Captain_Morch                    │    
+    # 6 │ 开源：http://t.cn/R1h3png (Github)     │
     #   └────────────────────┘
     #
 
@@ -571,10 +626,11 @@ if __name__ == "__main__":
     examChoose = ttk.Combobox(frmMain,textvariable = examName)
     examChoose.grid(column = 1,row = 1)
     examChoose["state"] = "readonly"
+    examChoose.bind("<<ComboboxSelected>>",examLoad)
 
     tk.Label(frmMain,text = "选择科目").grid(column = 0,row = 2,rowspan = 2)
     # 初始化'选择科目'Listbox对象
-    subChoose = tk.Listbox(frmMain,selectmode = tk.MULTIPLE)
+    subChoose = tk.Listbox(frmMain, selectmode = tk.MULTIPLE, height = 9)
     subChoose.grid(column = 1,row = 2, rowspan = 2)
 
     # 初始化'模板文件'Entry对象
@@ -594,34 +650,44 @@ if __name__ == "__main__":
     showExcelCheck = tk.Checkbutton(frmMain, text = "显示Excel", variable = showExcel)
     showExcelCheck.grid(column = 2, row = 3, columnspan = 2)
 
-    startButton = tk.Button(frmMain,text = "开始抓取", command = getcontent, width = 15, height = 4)
-    startButton.grid(row = 2,column = 2, columnspan = 2)
+    tk.Label(frmMain, text = r"欢迎使用来自幺二三的黑科技:D ").grid(row = 4,column = 0, columnspan = 2, sticky = tk.E)
+    tk.Label(frmMain, text = r"制作：Captain_Morch ").grid(row = 4,column = 2, columnspan = 2, sticky = tk.W)
 
-    frmLog.grid(column = 0)  # 显示登录容器
+    openIns = tk.Label(frmMain, text = r" 使用说明：http://t.cn/R1h3mFh")
+    openIns.grid(row = 5, column = 0, columnspan = 2, sticky = tk.E)
+    openIns.bind("<ButtonPress-1>", lambda *arg: webbrowser.open("http://t.cn/R1h3mFh"))
+
+    openCode = tk.Label(frmMain, text = r" 开源：http://t.cn/R1h3png")
+    openCode.grid(row = 5, column = 2, columnspan = 2, sticky = tk.W)
+    openCode.bind("<ButtonPress-1>", lambda *arg: webbrowser.open("http://t.cn/R1h3png"))
+
+    tk.Button(frmMain,text = "开始抓取", command = getcontent, width = 15, height = 4).grid(row = 2,column = 2, columnspan = 2)
     
+    frmLog.grid(column = 0)  # 显示登录容器
+
+    ## 生成进度窗体
+    #frmPro = tk.Frame(root)
+    
+    #proBar = ttk.Progressbar(frmPro, length = 200, maximum = len(conf["students"]))
+    #proBar.grid(row = 0, column = 0)
+
     log("完毕.")
 
     checkupdate()  # 检查更新
 
-    # 首次运行
-    try:conf["firstRun"]
-    except:conf["firstRun"]=1
-
-    if conf["firstRun"]:
-        webbrowser.open("http://p7zz4jl0d.bkt.clouddn.com/introduction.html")
-        conf["firstRun"] = 0
-        confwrite()
-
     readconf()  # 读取配置文件
 
-
-    log("-" *43 + "\n" + "-" *50 +
-        "\n欢迎使用多分网数据整理工具！\n" +
-        "源码地址: https://github.com/CaptainMorch/spiderForDoofenNet \n" +
-        "软件使用说明: http://t.cn/Ru0oFnA \n" +
-        "作者:Captain_Morch \nFor My Best Class23 :)\n" +
-        "-" *50 + "\n" + "-" *50)
+    #log("-" *43 + "\n" + "-" *50 +
+    #    "\n欢迎使用多分网数据整理工具！\n" +
+    #    "源码地址: https://github.com/CaptainMorch/spiderForDoofenNet \n" +
+    #    "软件使用说明: http://t.cn/Ru0oFnA \n" +
+    #    "作者:Captain_Morch \n来自幺二三的黑科技:D\n" +
+    #   "-" *50 + "\n" + "-" *50)
 
     root.mainloop()
+
+    log("窗体已退出.")
+    sleep(1)
+    log("结束进程.")
 
     exit()  # 关闭命令行
