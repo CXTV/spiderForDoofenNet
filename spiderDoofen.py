@@ -2,6 +2,7 @@
 # 导入库
 #
 import urllib.request as ur
+import threading as th
 import tkinter as tk
 import tkinter.messagebox as tm
 from tkinter import ttk
@@ -11,8 +12,9 @@ import json
 from traceback import format_exc
 import tkinter.filedialog as tf
 import webbrowser
-from time import sleep
+import time
 from sys import exit
+import pythoncom
 # 标准库
 
 import win32com.client  # Use "pip install pypiwin32" to get it
@@ -20,7 +22,7 @@ import win32com.client  # Use "pip install pypiwin32" to get it
 #
 # 全局变量
 #
-thisVision = 2337
+thisVision = 2338
 conf = {
     "username":"",
     "password":"",
@@ -61,6 +63,7 @@ subDict = {
     "生物": 9
     }
 
+
 #
 # 读取配置数据
 #
@@ -96,7 +99,7 @@ def readconf():
             remember.set(1)
             #log(str(conf))
             login()
-            getcontent()
+            checkvals()
         else:conf["crashed"] = 0
     # 断点继续
 
@@ -311,9 +314,9 @@ def selectpath():
     outputPathName.set(filepath)
 
 #
-# 主任务——下载管理数据
+# 检查所有值/Excel
 #
-def getcontent():
+def checkvals():
     global conf
     global header_send
 
@@ -380,162 +383,246 @@ def getcontent():
         log("开始从断点运行.")
         log("还需处理 " + str(len(conf["students"])) + " 名学生.")
 
-    # 唤起Excel
-    try:
-        app = win32com.client.DispatchEx('Excel.Application')
-        app.Visible = conf["showExcel"]
-        app.DisplayAlerts=0
-    except:
-        log("唤起Excel失败.停止运行.\n" + format_exc(),2)
-        tm.showerror("错误", "无法唤起 \"Excel.Application\",抓取停止\n")
-        return
-    else:
-        log("唤起Excel成功.")
+
 
     #
-    # 测试Excel及模板文件
+    # 爬取数据（由getThread执行）
     #
-    def testfile():
-        nonlocal app  # 上层对象
-        try:
-            testFile = app.Workbooks.Open(conf["inputFile"])
-        except:
-            error = format_exc()
-            if error.find("被呼叫方拒绝接收呼叫") != -1:
-                log("呼叫被Excel拒绝.",1)
-                tm.showerror("错误","请求被Excel拒绝。\n" +
-                               "请关闭Excel弹出的\"产品未激活\"对话框后，点击下方的确定按钮以重试")
-                log("重试.")
-                testfile()
-            else:
-                return error  # 返回未知错误
-            return False
-        else:
-            testFile.Close()
-            return False
+    def getcontent(self,app):
+        global conf
 
-    # 测试Excel及模板文档
-    log("开始测试Excel及模板文档.")
-    sleep(3)# 手动等待Excel响应
-    tmpRes = testfile()
-    if tmpRes:
-        log("无法打开: \"" + conf["inputFile"] + "\".停止运行.\n" + tmpRes,2)
-        tm.showerror("错误", "无法打开选择的模板文档.")
-        return None
-    log("完毕.")
-
-    conf["crashed"] = 1  # 记录断点
-
-    num = 0
-    total = str(len(conf["students"]))
-    
-    errorNo = 0
-    tryNo = 0
-    for stuId in conf["students"].copy():  # 遍历学生
-        try:
-            num += 1
-            student = conf["students"][stuId]
-        
-            log("开始加载学生" + student["name"] + ".(" + str(num) + "/" + total + ")")
-
-            # 打开模板文档
-            try:template = app.Workbooks.Open(conf["inputFile"])
+        #
+        # 测试Excel及模板文件
+        #
+        def testfile():
+            nonlocal app  # 上层对象
+            try:
+                testFile = app.Workbooks.Open(conf["inputFile"])
             except:
-                log("无法打开: \"" + conf["inputFile"] + "\".停止运行.\n" + format_exc(),2)
-                tm.showerror("错误", "无法打开选择的模板文档，抓取停止")
-                return
-            #else:log("Opened " + conf["inputFile"])
-
-            for keys in student:
-                app.ActiveSheet.Cells.Replace(keys, student[keys],1)
-
-            table = str.maketrans("/", "\\")
-            writePath = conf["outputPath"].translate(table) + "\\" + student["name"] + ".xlsx"
-
-            try:app.ActiveWorkBook.SaveAs(writePath)  # 另存为
-            except:
-                log("保存文件失败. \"" + writePath + "\".停止运行.\n" + format_exc(),2)
-                tm.showerror("错误", "无法保存文档，抓取停止\n请确认目录存在")
-                return
-            else:log("另存为 " + writePath)
-
-            # 遍历科目
-            for subject in conf["subjects"]:
-                header_send["Cookie"] = "JSESSIONID=" + conf["jsessionId"]
-                # 数据包头
-
-                url = "http://www.doofen.com/doofen/851001/report/subjectDatas?rId=" + \
-                    subject["id"] + "_" + conf["examId"] + "_" + stuId
-                # 数据包地址
-
-                request = ur.Request(url = url, headers = header_send)
-                response = ur.urlopen(request).read().decode()
-                log("请求" + student["name"] + "的" + subject["name"] +  "数据成功.(" + str(len(response)) + "Bytes)")
-                dataObj = json.loads(response)  # 解析数据包
-
-                childrenDict.clear()
-                getchildren(dataObj)
-                # 遍历字典对象
-
-                # 整理错题
-                try:wrongInfo = childrenDict["wrongItemStatInfo"]
-                except KeyError:wrongInfo = []
-                
-                childrenDict["wrongItemStatInfo"] = ""
-                # 获取错题单行
-                wrongStart = app.ActiveSheet.Cells.Find(What = "wrongStart" + str(subject["id"]), LookAt=1 )
-                wrongEnd = app.ActiveSheet.Cells.Find(What = "wrongEnd" + str(subject["id"]), LookAt = 1 )
-            
-                for each in wrongInfo:
-                    app.ActiveSheet.Rows(wrongStart.Row).Insert(2,2)
-                    app.ActiveSheet.Range(wrongStart,wrongEnd).Copy()
-                    app.ActiveSheet.Range(wrongStart,wrongEnd).Offset(0,1).Select()
-                
-                    app.ActiveSheet.Paste()
-
-                    app.Selection.Replace("wrongStart" + str(subject["id"]), " ",1)
-                    app.Selection.Replace("wrongEnd" + str(subject["id"]), " ",1)
-
-                    for i in range(len(each)):
-                        childKey = list(each.keys())[i]
-                        childVal = each[childKey]
-                        app.Selection.Replace(childKey + str(subject["id"]), str(childVal),1)
-
-                app.ActiveSheet.Rows(wrongStart.Row).Delete()
-
-                for i in range(len(childrenDict)):
-                    childKey = list(childrenDict.keys())[i]
-                    childVal = childrenDict[childKey]
-                    app.ActiveSheet.Cells.Replace(childKey + str(subject["id"]), str(childVal),1)
-
-
-            del conf["students"][stuId]
-            confwrite()
-            # 写入配置文件
-
-            app.ActiveWorkbook.Save()
-            app.ActiveWorkbook.Close()
-            log("保存完毕.")
-
-        except:
-            error = format_exc()
-            if error.find("OLE") == -1 :
-                log("未知错误" + error ,2)
-                if tryNo < 6:
-                    tryNo += 1
-                    log("尝试跳过" + student["name"] + "的数据加载.(skip" + str(tryNo) + ")",2)
+                error = format_exc()
+                if error.find("被呼叫方拒绝接收呼叫") != -1:
+                    log("呼叫被Excel拒绝.",1)
+                    tm.showerror("错误","请求被Excel拒绝。\n" +
+                                   "请关闭Excel弹出的\"产品未激活\"对话框后，点击下方的确定按钮以重试")
+                    log("重试.")
+                    testfile()
                 else:
-                    log("错误超过允许次数.停止运行.",2)
-                    return
+                    return error  # 返回未知错误
+                return False
             else:
-                log("Excel窗口被关闭.",1)
+                testFile.Close()
+                return False
+
+        # 测试Excel及模板文档
+        log("开始测试Excel及模板文档.")
+        time.sleep(3)# 手动等待Excel响应
+        tmpRes = testfile()
+        if tmpRes:
+            log("无法打开: \"" + conf["inputFile"] + "\".停止运行.\n" + tmpRes,2)
+            tm.showerror("错误", "无法打开选择的模板文档.")
+            return None
+        log("完毕.")
 
 
-    conf["crashed"] = 0
-    confwrite()
-    # 写入配置文件
-    tm.showinfo("提示", "抓取完成！")
-    app.Quit()# 关闭Excel
+        conf["crashed"] = 1  # 记录断点
+
+        num = 0
+        total = len(conf["students"])
+    
+        errorNo = 0
+        tryNo = 0
+        startTime = time.clock()
+        for stuId in conf["students"].copy():  # 遍历学生
+
+            if self.exit:
+                log("停止线程.")
+                return None
+
+            pbar.config(value = num)
+            ptext.config(text = str(num) + "/" + str(total))
+
+            if num:  # num != 0
+                leftTime = (time.clock()-startTime) / num * (total-num)
+                timeLeft.config(text = str(int(leftTime // 60)) + " 分钟 " + str(int(leftTime % 60)) + " 秒")
+
+            root.update()
+
+            try:
+                num += 1
+                student = conf["students"][stuId]
+        
+                log("开始加载学生" + student["name"] + ".(" + str(num) + "/" + str(total) + ")")
+
+                # 打开模板文档
+                try:template = app.Workbooks.Open(conf["inputFile"])
+                except:
+                    log("无法打开: \"" + conf["inputFile"] + "\".停止运行.\n" + format_exc(),2)
+                    tm.showerror("错误", "无法打开选择的模板文档，抓取停止")
+                    return
+                #else:log("Opened " + conf["inputFile"])
+
+                for keys in student:
+                    app.ActiveSheet.Cells.Replace(keys, student[keys],1)
+
+                table = str.maketrans("/", "\\")
+                writePath = conf["outputPath"].translate(table) + "\\" + student["name"] + ".xlsx"
+
+                try:app.ActiveWorkBook.SaveAs(writePath)  # 另存为
+                except:
+                    log("保存文件失败. \"" + writePath + "\".停止运行.\n" + format_exc(),2)
+                    tm.showerror("错误", "无法保存文档，抓取停止\n请确认目录存在")
+                    return
+                else:log("另存为 " + writePath)
+
+                # 遍历科目
+                for subject in conf["subjects"]:
+                    header_send["Cookie"] = "JSESSIONID=" + conf["jsessionId"]
+                    # 数据包头
+
+                    url = "http://www.doofen.com/doofen/851001/report/subjectDatas?rId=" + \
+                        subject["id"] + "_" + conf["examId"] + "_" + stuId
+                    # 数据包地址
+
+                    request = ur.Request(url = url, headers = header_send)
+                    response = ur.urlopen(request).read().decode()
+                    log("请求" + student["name"] + "的" + subject["name"] +  "数据成功.(" + str(len(response)) + "Bytes)")
+                    dataObj = json.loads(response)  # 解析数据包
+
+                    childrenDict.clear()
+                    getchildren(dataObj)
+                    # 遍历字典对象
+
+                    # 整理错题
+                    try:wrongInfo = childrenDict["wrongItemStatInfo"]
+                    except KeyError:wrongInfo = []
+                
+                    childrenDict["wrongItemStatInfo"] = ""
+                    # 获取错题单行
+                    wrongStart = app.ActiveSheet.Cells.Find(What = "wrongStart" + str(subject["id"]), LookAt=1 )
+                    wrongEnd = app.ActiveSheet.Cells.Find(What = "wrongEnd" + str(subject["id"]), LookAt = 1 )
+            
+                    for each in wrongInfo:
+                        app.ActiveSheet.Rows(wrongStart.Row).Insert(2,2)
+                        app.ActiveSheet.Range(wrongStart,wrongEnd).Copy()
+                        app.ActiveSheet.Range(wrongStart,wrongEnd).Offset(0,1).Select()
+                
+                        app.ActiveSheet.Paste()
+
+                        app.Selection.Replace("wrongStart" + str(subject["id"]), " ",1)
+                        app.Selection.Replace("wrongEnd" + str(subject["id"]), " ",1)
+
+                        for i in range(len(each)):
+                            childKey = list(each.keys())[i]
+                            childVal = each[childKey]
+                            app.Selection.Replace(childKey + str(subject["id"]), str(childVal),1)
+
+                    app.ActiveSheet.Rows(wrongStart.Row).Delete()
+
+                    for i in range(len(childrenDict)):
+                        childKey = list(childrenDict.keys())[i]
+                        childVal = childrenDict[childKey]
+                        app.ActiveSheet.Cells.Replace(childKey + str(subject["id"]), str(childVal),1)
+
+
+                del conf["students"][stuId]
+                confwrite()
+                # 写入配置文件
+
+                app.ActiveWorkbook.Save()
+                app.ActiveWorkbook.Close()
+                log("保存完毕.")
+
+
+            except:
+                error = format_exc()
+                if error.find("OLE") == -1 :
+                    log("未知错误" + error ,2)
+                    if tryNo < 6:
+                        tryNo += 1
+                        log("尝试跳过" + student["name"] + "的数据加载.(skip" + str(tryNo) + ")",2)
+                    else:
+                        log("错误超过允许次数.停止运行.",2)
+                        return
+                else:
+                    log("Excel窗口被关闭.",1)
+            pass  # except
+        pass  # for
+
+        conf["crashed"] = 0
+        confwrite()
+        # 写入配置文件
+
+        tm.showinfo("完成","抓取完成！")
+        return None
+
+    
+    class myThread(th.Thread):
+        exit = False
+
+        def run(self):
+            log("工作线程开启.")
+            pythoncom.CoInitialize()
+
+            # 唤起Excel
+            try:
+                app = win32com.client.DispatchEx('Excel.Application')
+                app.Visible = conf["showExcel"]
+                app.DisplayAlerts=0
+            except:
+                log("唤起Excel失败.停止运行.\n" + format_exc(),2)
+                tm.showerror("错误", "无法唤起 \"Excel.Application\",抓取停止\n")
+                return
+            else:
+                log("唤起Excel成功.")
+
+            # 执行爬取函数
+            try:
+                getcontent(self,app)
+            except:
+                log("工作线程发生未知错误." + format_exc(),2)
+                log("试图结束线程.",1)
+            finally:
+                pythoncom.CoUninitialize()
+                frmPro.grid_remove()
+                frmMain.grid(row = 0)
+                
+                try:app.Quit()
+                except:log("关闭Excel失败.请打开任务管理器检查Excel是否已退出." + format_exc(),2)
+                else: log("Excel已关闭.")
+
+                log("工作线程已退出.")
+                return None
+
+        def stop(self):
+            log("收到停止指令.等待线程完成当前处理.")
+            self.exit = True
+            
+
+    # 创建工作线程
+    getThread = myThread()
+
+    getThread.daemon = True
+    getThread.start()
+    # 开启
+        
+    frmPro = tk.Frame(root)
+    ptext = tk.Label(frmPro, text="00/00")
+    ptext.grid(row = 0, column = 0)
+
+    pbar = ttk.Progressbar(frmPro, length=200, maximum=len(conf["students"]))
+    pbar.grid(row = 0, column = 1)
+
+    tk.Label(frmPro, text="剩余时间:").grid(row = 1, column = 0, sticky = tk.E)
+    timeLeft = tk.Label(frmPro, text = "00:00")
+    timeLeft.grid(row = 1, column = 1, sticky = tk.W)
+
+    pause = tk.Button(frmPro, command=getThread.stop, text="停止")
+    pause.grid(row = 2, column = 0, columnspan = 2)
+    #info = tk.Text(frmPro,height = 10,width = 62, state = tk.DISABLED)
+    #info.grid(column = 0,row = 1)
+
+    frmMain.grid_remove()
+    frmPro.grid(row = 0)
 
 #
 # 配置文件写入
@@ -558,7 +645,7 @@ def log(string,type = 0):
 #
 if __name__ == "__main__":
     log("程序开始运行.")
-
+    log("当前时间戳:" + str(time.clock()))
     log("开始绘制窗体...")
     #
     # 生成主窗体
@@ -661,7 +748,7 @@ if __name__ == "__main__":
     openCode.grid(row = 5, column = 2, columnspan = 2, sticky = tk.W)
     openCode.bind("<ButtonPress-1>", lambda *arg: webbrowser.open("http://t.cn/R1h3png"))
 
-    tk.Button(frmMain,text = "开始抓取", command = getcontent, width = 15, height = 4).grid(row = 2,column = 2, columnspan = 2)
+    tk.Button(frmMain,text = "开始抓取", command = checkvals, width = 15, height = 4).grid(row = 2,column = 2, columnspan = 2)
     
     frmLog.grid(column = 0)  # 显示登录容器
 
@@ -687,7 +774,7 @@ if __name__ == "__main__":
     root.mainloop()
 
     log("窗体已退出.")
-    sleep(1)
+    time.sleep(1)
     log("结束进程.")
 
     exit()  # 关闭命令行
